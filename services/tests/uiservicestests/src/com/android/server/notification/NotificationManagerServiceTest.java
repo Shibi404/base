@@ -373,6 +373,7 @@ public class NotificationManagerServiceTest extends UiServiceTestCase {
         when(mPackageManager.getPackagesForUid(mUid)).thenReturn(new String[]{PKG});
         when(mPackageManagerClient.getPackagesForUid(anyInt())).thenReturn(new String[]{PKG});
         mContext.addMockSystemService(AppOpsManager.class, mock(AppOpsManager.class));
+        when(mUm.getProfileIds(0, false)).thenReturn(new int[]{0});
 
         // write to a test file; the system file isn't readable from tests
         mFile = new File(mContext.getCacheDir(), "test.xml");
@@ -483,6 +484,18 @@ public class NotificationManagerServiceTest extends UiServiceTestCase {
     private NotificationRecord generateNotificationRecord(NotificationChannel channel,
             Notification.TvExtender extender) {
         return generateNotificationRecord(channel, extender, false /* isBubble */);
+    }
+
+    private NotificationRecord generateNotificationRecord(NotificationChannel channel, int userId) {
+        if (channel == null) {
+            channel = mTestNotificationChannel;
+        }
+        Notification.Builder nb = new Notification.Builder(mContext, channel.getId())
+                .setContentTitle("foo")
+                .setSmallIcon(android.R.drawable.sym_def_app_icon);
+        StatusBarNotification sbn = new StatusBarNotification(PKG, PKG, 1, "tag", mUid, 0,
+                nb.build(), new UserHandle(userId), null, 0);
+        return new NotificationRecord(mContext, sbn, channel);
     }
 
     private NotificationRecord generateNotificationRecord(NotificationChannel channel,
@@ -5246,160 +5259,31 @@ public class NotificationManagerServiceTest extends UiServiceTestCase {
     }
 
     @Test
-    public void testNotificationBubbles_flagAutoExpandForeground_fails_notForeground()
-            throws Exception {
-        // Bubbles are allowed!
-        setUpPrefsForBubbles(true /* global */, true /* app */, true /* channel */);
+    public void testGetActiveNotification_filtersUsers() throws Exception {
+        when(mUm.getProfileIds(0, false)).thenReturn(new int[]{0, 10});
 
-        // Give it bubble metadata
-        Notification.BubbleMetadata data = getBasicBubbleMetadataBuilder()
-                .setSuppressNotification(true)
-                .setAutoExpandBubble(true).build();
-        // Give it a person
-        Person person = new Person.Builder()
-                .setName("bubblebot")
-                .build();
-        // It needs remote input to be bubble-able
-        RemoteInput remoteInput = new RemoteInput.Builder("reply_key").setLabel("reply").build();
-        PendingIntent inputIntent = PendingIntent.getActivity(mContext, 0, new Intent(), 0);
-        Icon icon = Icon.createWithResource(mContext, android.R.drawable.sym_def_app_icon);
-        Notification.Action replyAction = new Notification.Action.Builder(icon, "Reply",
-                inputIntent).addRemoteInput(remoteInput)
-                .build();
-        // Make it messaging style
-        Notification.Builder nb = new Notification.Builder(mContext,
-                mTestNotificationChannel.getId())
-                .setContentTitle("foo")
-                .setBubbleMetadata(data)
-                .setStyle(new Notification.MessagingStyle(person)
-                        .setConversationTitle("Bubble Chat")
-                        .addMessage("Hello?",
-                                SystemClock.currentThreadTimeMillis() - 300000, person)
-                        .addMessage("Is it me you're looking for?",
-                                SystemClock.currentThreadTimeMillis(), person)
-                )
-                .setActions(replyAction)
-                .setSmallIcon(android.R.drawable.sym_def_app_icon);
+        NotificationRecord nr0 =
+                generateNotificationRecord(mTestNotificationChannel, 0);
+        mBinderService.enqueueNotificationWithTag(PKG, PKG, "tag0",
+                nr0.sbn.getId(), nr0.sbn.getNotification(), nr0.sbn.getUserId());
 
-        StatusBarNotification sbn = new StatusBarNotification(PKG, PKG, 1, null, mUid, 0,
-                nb.build(), new UserHandle(mUid), null, 0);
-        NotificationRecord nr = new NotificationRecord(mContext, sbn, mTestNotificationChannel);
+        NotificationRecord nr10 =
+                generateNotificationRecord(mTestNotificationChannel, 10);
+        mBinderService.enqueueNotificationWithTag(PKG, PKG, "tag10",
+                nr10.sbn.getId(), nr10.sbn.getNotification(), nr10.sbn.getUserId());
 
-        // Ensure we're not foreground
-        when(mActivityManager.getPackageImportance(nr.sbn.getPackageName())).thenReturn(
-                IMPORTANCE_VISIBLE);
-
-        mBinderService.enqueueNotificationWithTag(PKG, PKG, null,
-                nr.sbn.getId(), nr.sbn.getNotification(), nr.sbn.getUserId());
+        NotificationRecord nr11 =
+                generateNotificationRecord(mTestNotificationChannel, 11);
+        mBinderService.enqueueNotificationWithTag(PKG, PKG, "tag11",
+                nr11.sbn.getId(), nr11.sbn.getNotification(), nr11.sbn.getUserId());
         waitForIdle();
 
-        // yes allowed, yes messaging, yes bubble
-        Notification notif = mService.getNotificationRecord(sbn.getKey()).getNotification();
-        assertTrue(notif.isBubbleNotification());
-
-        // Our flags should have failed since we're not foreground
-        assertFalse(notif.getBubbleMetadata().getAutoExpandBubble());
-        assertFalse(notif.getBubbleMetadata().isNotificationSuppressed());
-    }
-
-    @Test
-    public void testNotificationBubbles_flagAutoExpandForeground_succeeds_foreground()
-            throws RemoteException {
-        // Bubbles are allowed!
-        setUpPrefsForBubbles(true /* global */, true /* app */, true /* channel */);
-
-        // Give it bubble metadata
-        Notification.BubbleMetadata data = getBasicBubbleMetadataBuilder()
-                .setSuppressNotification(true)
-                .setAutoExpandBubble(true).build();
-        // Give it a person
-        Person person = new Person.Builder()
-                .setName("bubblebot")
-                .build();
-        // It needs remote input to be bubble-able
-        RemoteInput remoteInput = new RemoteInput.Builder("reply_key").setLabel("reply").build();
-        PendingIntent inputIntent = PendingIntent.getActivity(mContext, 0, new Intent(), 0);
-        Icon icon = Icon.createWithResource(mContext, android.R.drawable.sym_def_app_icon);
-        Notification.Action replyAction = new Notification.Action.Builder(icon, "Reply",
-                inputIntent).addRemoteInput(remoteInput)
-                .build();
-        // Make it messaging style
-        Notification.Builder nb = new Notification.Builder(mContext,
-                mTestNotificationChannel.getId())
-                .setContentTitle("foo")
-                .setBubbleMetadata(data)
-                .setStyle(new Notification.MessagingStyle(person)
-                        .setConversationTitle("Bubble Chat")
-                        .addMessage("Hello?",
-                                SystemClock.currentThreadTimeMillis() - 300000, person)
-                        .addMessage("Is it me you're looking for?",
-                                SystemClock.currentThreadTimeMillis(), person)
-                )
-                .setActions(replyAction)
-                .setSmallIcon(android.R.drawable.sym_def_app_icon);
-
-        StatusBarNotification sbn = new StatusBarNotification(PKG, PKG, 1, null, mUid, 0,
-                nb.build(), new UserHandle(mUid), null, 0);
-        NotificationRecord nr = new NotificationRecord(mContext, sbn, mTestNotificationChannel);
-
-        // Ensure we are in the foreground
-        when(mActivityManager.getPackageImportance(nr.sbn.getPackageName())).thenReturn(
-                IMPORTANCE_FOREGROUND);
-
-        mBinderService.enqueueNotificationWithTag(PKG, PKG, null,
-                nr.sbn.getId(), nr.sbn.getNotification(), nr.sbn.getUserId());
-        waitForIdle();
-
-        // yes allowed, yes messaging, yes bubble
-        Notification notif = mService.getNotificationRecord(sbn.getKey()).getNotification();
-        assertTrue(notif.isBubbleNotification());
-
-        // Our flags should have failed since we are foreground
-        assertTrue(notif.getBubbleMetadata().getAutoExpandBubble());
-        assertTrue(notif.getBubbleMetadata().isNotificationSuppressed());
-    }
-
-    @Test
-    public void testNotificationBubbles_bubbleChildrenStay_whenGroupSummaryDismissed()
-            throws Exception {
-        // Bubbles are allowed!
-        setUpPrefsForBubbles(true /* global */, true /* app */, true /* channel */);
-
-        NotificationRecord nrSummary = addGroupWithBubblesAndValidateAdded(
-                true /* summaryAutoCancel */);
-
-        // Dismiss summary
-        final NotificationVisibility nv = NotificationVisibility.obtain(nrSummary.getKey(), 1, 2,
-                true);
-        mService.mNotificationDelegate.onNotificationClear(mUid, 0, PKG, nrSummary.sbn.getTag(),
-                nrSummary.sbn.getId(), nrSummary.getUserId(), nrSummary.getKey(),
-                NotificationStats.DISMISSAL_SHADE,
-                NotificationStats.DISMISS_SENTIMENT_NEUTRAL, nv);
-        waitForIdle();
-
-        // The bubble should still exist
-        StatusBarNotification[] notifsAfter = mBinderService.getActiveNotifications(PKG);
-        assertEquals(1, notifsAfter.length);
-    }
-
-    @Test
-    public void testNotificationBubbles_bubbleChildrenStay_whenGroupSummaryClicked()
-            throws Exception {
-        // Bubbles are allowed!
-        setUpPrefsForBubbles(true /* global */, true /* app */, true /* channel */);
-
-        NotificationRecord nrSummary = addGroupWithBubblesAndValidateAdded(
-                true /* summaryAutoCancel */);
-
-        // Click summary
-        final NotificationVisibility nv = NotificationVisibility.obtain(nrSummary.getKey(), 1, 2,
-                true);
-        mService.mNotificationDelegate.onNotificationClick(mUid, Binder.getCallingPid(),
-                nrSummary.getKey(), nv);
-        waitForIdle();
-
-        // The bubble should still exist
-        StatusBarNotification[] notifsAfter = mBinderService.getActiveNotifications(PKG);
-        assertEquals(1, notifsAfter.length);
+        StatusBarNotification[] notifs = mBinderService.getActiveNotifications(PKG);
+        assertEquals(2, notifs.length);
+        for (StatusBarNotification sbn : notifs) {
+            if (sbn.getUserId() == 11) {
+                fail("leaked data across users");
+            }
+        }
     }
 }
