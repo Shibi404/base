@@ -3318,12 +3318,11 @@ public class StatusBar extends SystemUI implements DemoMode,
         return mState == StatusBarState.FULLSCREEN_USER_SWITCHER;
     }
 
-    private boolean isAutomotive() {
-        return mContext != null
-                && mContext.getPackageManager().hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE);
+    boolean updateIsKeyguard() {
+        return updateIsKeyguard(false /* force */);
     }
 
-    private boolean updateIsKeyguard() {
+    boolean updateIsKeyguard(boolean force) {
         boolean wakeAndUnlocking = mBiometricUnlockController.getMode()
                 == BiometricUnlockController.MODE_WAKE_AND_UNLOCK;
 
@@ -3352,7 +3351,7 @@ public class StatusBar extends SystemUI implements DemoMode,
                 showKeyguardImpl();
             }
         } else {
-            return hideKeyguardImpl();
+            return hideKeyguardImpl(force);
         }
         return false;
     }
@@ -3494,11 +3493,11 @@ public class StatusBar extends SystemUI implements DemoMode,
     /**
      * @return true if we would like to stay in the shade, false if it should go away entirely
      */
-    public boolean hideKeyguardImpl() {
+    public boolean hideKeyguardImpl(boolean force) {
         mIsKeyguard = false;
         Trace.beginSection("StatusBar#hideKeyguard");
         boolean staying = mStatusBarStateController.leaveOpenOnKeyguardHide();
-        if (!(mStatusBarStateController.setState(StatusBarState.SHADE))) {
+        if (!(mStatusBarStateController.setState(StatusBarState.SHADE, force))) {
             //TODO: StatusBarStateController should probably know about hiding the keyguard and
             // notify listeners.
 
@@ -4001,7 +4000,8 @@ public class StatusBar extends SystemUI implements DemoMode,
                 // is correct.
                 mHandler.post(() -> onCameraLaunchGestureDetected(mLastCameraLaunchSource));
             }
-            updateIsKeyguard();
+            // When finished going to sleep, force the status bar state to avoid stale state.
+            updateIsKeyguard(true /* force */);
         }
 
         @Override
