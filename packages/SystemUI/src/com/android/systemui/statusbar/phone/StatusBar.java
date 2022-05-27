@@ -3318,6 +3318,11 @@ public class StatusBar extends SystemUI implements DemoMode,
         return mState == StatusBarState.FULLSCREEN_USER_SWITCHER;
     }
 
+    private boolean isAutomotive() {
+        return mContext != null
+                && mContext.getPackageManager().hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE);
+    }
+
     boolean updateIsKeyguard() {
         return updateIsKeyguard(false /* force */);
     }
